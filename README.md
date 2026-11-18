@@ -382,6 +382,10 @@ Agent Office → Settings… (⌘,):
 - **Check for updates once a day** (off by default): see *Updating* below.
 - **Join the shared room** (on by default, does nothing until a room is configured).
 - **Jukebox in the lounge** (on by default): off hides it and stops its helper.
+- **Remind me to drink water** (off by default): every 30 minutes, hour or 2 hours, a small card
+  in the office asks you to drink some water. **Done** starts the next interval, **In 10 min** asks
+  again in 10 minutes. With the window off screen a notification says it too, and with **Play a
+  sound** on it purrs.
 - **Open at login** (off by default): starts Agent Office when you log in. Turn it on on the Mac
   that hosts a room, so the room is back after a restart. macOS may ask you to approve it in
   System Settings → General → Login Items.

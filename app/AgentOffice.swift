@@ -303,7 +303,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         NSApp.activate(ignoringOtherApps: true)
         decideWelcome()                                      // before the env import: it looks at what was set up before
         importEnvOnce()                                      // before the first look at the room (RoomSetup.swift)
-        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.syncRoom(); self?.push() }
+        scheduleWater(after: TimeInterval(waterMinutes * 60))   // Water.swift
+        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.syncRoom(); self?.push(); self?.checkWater() }
         syncRoom()
         updater.onChange = { [weak self] in self?.pushUpdate() }
         jukebox.onChange = { [weak self] in self?.push() }
@@ -468,6 +469,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         gameMessage(body)                                                   // Games.swift
         if body["update"] == "go" { DispatchQueue.main.async { self.offerSigning { self.updater.update() } } }   // Signing.swift
         if body["welcome"] == "done" { defaults.set(true, forKey: "welcomed") }
+        if let a = body["water"] { waterAnswered(a) }   // the water card's Done / Later (Water.swift)
         if let j = body["jukebox"] { jukebox.control(j) }   // previous | playpause | next
         if body["profile"] == "edit" { DispatchQueue.main.async { self.editProfile() } }   // after this message returns
         if let r = body["room"] {
@@ -720,7 +722,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
 
     @objc func showSettings() {
         if settings == nil {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 380, height: 700),
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 380, height: 772),
                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
             w.title = "Agent Office Settings"
             w.isReleasedWhenClosed = false
@@ -785,8 +787,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             hint8.frame = NSRect(x: 38, y: 18, width: 320, height: 32)
             let hint7 = NSTextField(wrappingLabelWithString: "A room you create or join is saved and joined again at every launch, until you change it or delete it here.")
             hint7.frame = NSRect(x: 20, y: 516, width: 340, height: 30)
-            for h in [hint, hint2, hint3, hint4, hint5, hint6, hint7, hint8] { h.textColor = .secondaryLabelColor; h.font = .systemFont(ofSize: 11) }
-            for v in [sigL, sig, profL, prof, impL, imp, roomLbl, del, hint7, upd, hint6, lgn, hint5, shr, hint4, box, hint, snd, hint2, eco, hint3, jbx, hint8] { w.contentView?.addSubview(v) }
+            let watL = NSTextField(labelWithString: "Remind me to drink water")
+            watL.frame = NSRect(x: 20, y: 734, width: 200, height: 20)
+            let wat = NSPopUpButton(frame: NSRect(x: 220, y: 728, width: 145, height: 30), pullsDown: false)
+            wat.addItems(withTitles: ["Off", "Every 30 minutes", "Every hour", "Every 2 hours"])   // WATER_CHOICES
+            wat.selectItem(at: WATER_CHOICES.firstIndex(of: waterMinutes) ?? 0)
+            wat.target = self; wat.action = #selector(pickWater(_:))
+            let hint9 = NSTextField(wrappingLabelWithString: "Off by default. A small card in the office asks you to drink some water; Done starts the next interval, Later asks again in 10 minutes.")
+            hint9.frame = NSRect(x: 20, y: 692, width: 340, height: 32)
+            for h in [hint, hint2, hint3, hint4, hint5, hint6, hint7, hint8, hint9] { h.textColor = .secondaryLabelColor; h.font = .systemFont(ofSize: 11) }
+            for v in [watL, wat, hint9, sigL, sig, profL, prof, impL, imp, roomLbl, del, hint7, upd, hint6, lgn, hint5, shr, hint4, box, hint, snd, hint2, eco, hint3, jbx, hint8] { w.contentView?.addSubview(v) }
             w.center()
             settings = w
         }

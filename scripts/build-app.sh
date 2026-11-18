@@ -29,7 +29,7 @@ mkdir -p "$B/MacOS" "$B/Resources"
 
 # the file with the top-level startup code has to be called main.swift when there are several
 cp "$ROOT/app/AgentOffice.swift" "$BUILD/main.swift"
-swiftc -O -o "$B/MacOS/AgentOffice" "$BUILD/main.swift" "$ROOT/app/Room.swift" "$ROOT/app/Update.swift" "$ROOT/app/RoomSetup.swift" "$ROOT/app/Profile.swift" "$ROOT/app/Jukebox.swift" "$ROOT/app/Signing.swift" "$ROOT/app/Games.swift" "$ROOT/app/Terminal.swift" -framework Cocoa -framework WebKit -framework Network -framework ServiceManagement -framework UserNotifications
+swiftc -O -o "$B/MacOS/AgentOffice" "$BUILD/main.swift" "$ROOT/app/Room.swift" "$ROOT/app/Update.swift" "$ROOT/app/RoomSetup.swift" "$ROOT/app/Profile.swift" "$ROOT/app/Jukebox.swift" "$ROOT/app/Signing.swift" "$ROOT/app/Games.swift" "$ROOT/app/Terminal.swift" "$ROOT/app/Water.swift" -framework Cocoa -framework WebKit -framework Network -framework ServiceManagement -framework UserNotifications
 cp "$ROOT/web/office.html" "$B/Resources/"
 cp "$ROOT"/web/games*.js "$B/Resources/"                      # the mini-games (office.html loads them)
 cp "$ROOT/web/terminal.html" "$B/Resources/"                 # the terminal under the office (Terminal.swift)

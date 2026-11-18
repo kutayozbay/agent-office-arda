@@ -1881,6 +1881,25 @@ function renderStats() {
     <div class="card"><small>working</small><b>${count(["working", "compacting", "background"])}</b></div>
     <div class="card"><small>subagents</small><b>${subsN}</b></div>
     <div class="card"><small>cost of these sessions</small><b>${lives.length ? "$" + cost.toFixed(2) : "–"}</b></div></div>`;
+  // Cost by repo: the sessions that did something today (an event from the hook since midnight),
+  // grouped like the shirts. The mod reports what a session has cost since it started, not per
+  // day, so a session that began before today counts in full.
+  const midnight = new Date(snap.now * 1000).setHours(0, 0, 0, 0) / 1000, repos = new Map();
+  let older = 0;
+  for (const s of all) {
+    if (!s.live || s.live.costUsd == null) continue;
+    if (Math.max(s.updated || 0, s.beat || 0) < midnight) { older++; continue; }
+    const k = team(s.cwd) || s.id, r = repos.get(k) || { k, cost: 0, n: 0 };
+    r.cost += s.live.costUsd; r.n++; repos.set(k, r);
+  }
+  if (repos.size) {
+    const rows = [...repos.values()].sort((a, b) => b.cost - a.cost), total = rows.reduce((t, r) => t + r.cost, 0);
+    h += `<h2>COST BY REPO · SESSIONS ACTIVE TODAY</h2><table style="width:auto"><tr><th>Repo</th><th>Sessions</th><th>Cost</th><th></th></tr>`;
+    for (const r of rows) h += `<tr><td title="/${esc(r.k)}"><span class="dot" style="background:${SHIRTS[hash(r.k) % SHIRTS.length]}"></span>${esc(base(r.k) || "untitled")}</td>
+      <td>${r.n}</td><td>$${r.cost.toFixed(2)}</td><td>${bar(total ? r.cost / total * 100 : 0, "#e3c74f")}</td></tr>`;
+    h += `<tr><td><b>total</b></td><td>${rows.reduce((t, r) => t + r.n, 0)}</td><td><b>$${total.toFixed(2)}</b></td><td></td></tr></table>
+      <div class="note">Each session's cost since it started, so one that began before today counts in full${older ? `; ${older} session${older === 1 ? "" : "s"} with nothing since midnight left out` : ""}.</div>`;
+  }
   h += `<h2>SESSIONS</h2><table><tr><th>Session</th><th>Where</th><th>State</th><th>Model</th><th>Context</th><th>Cost</th><th>Subagents</th></tr>`;
   for (const s of all) {
     const x = shown(s), l = s.live, p = l && l.context && l.context.percent, ag = agentsOf(s);
@@ -1942,7 +1961,7 @@ if (!bridge) {
       { id: "s5", kind: "session", model: "claude-opus-5-5", effort: "xhigh", title: "Infra cleanup", cwd: "/Users/me/code/deploy-scripts", state: "working", since: t0 - 2000, beat: t0 - 1500, subagents: {} },
       { id: "s6", kind: "session", model: "claude-haiku-5-5", effort: "low", title: "Flaky test hunt", cwd: "/Users/me/code/web-app", state: "crashed", since: t0 - 90, beat: t0 - 90, subagents: {} },
       { id: "s8", kind: "session", model: "claude-sonnet-5-5", effort: "medium", title: "Release notes", cwd: "/Users/me/code/web-app", state: "idle", since: t0 - 3000, beat: t0 - 3000, subagents: {} },
-      { id: "s9", kind: "session", model: "claude-opus-5-5", effort: "high", title: "Onboarding docs", cwd: "/Users/me/code/docs", state: "idle", since: t0 - 5000, beat: t0 - 5000, subagents: {} },
+      { id: "s9", kind: "session", model: "claude-opus-5-5", effort: "high", title: "Onboarding docs", cwd: "/Users/me/code/docs", state: "idle", since: t0 - 100000, beat: t0 - 100000, subagents: {} },
       { id: "s10", kind: "session", model: "claude-haiku-5-5", effort: "low", title: "Log cleanup", cwd: "/Users/me/code/infra", state: "idle", since: t0 - 4000, beat: t0 - 4000, subagents: {} },
       { id: "s11", kind: "session", model: "claude-sonnet-5-5", effort: "high", title: "Cache warmup", cwd: "/Users/me/code/engine", state: "done", since: t0 - 4000, beat: t0 - 4000, subagents: {} },
       { id: "s12", kind: "session", model: "claude-opus-5-5", effort: "high", title: "API sketch", cwd: "/Users/me/code/web-app", state: "idle", since: t0 - 7000, beat: t0 - 7000, subagents: {} },
@@ -1960,7 +1979,7 @@ if (!bridge) {
   }; };
   const LIVE = {
     s1: { ctx: 38, cost: 2.41, agents: { a1: "running", a2: "waiting" } }, s2: { ctx: 64, cost: 1.12 }, s3: { ctx: 22, cost: 0.31 },
-    s5: { ctx: 91, cost: 4.80 }, s6: { ctx: 12, cost: 0.05 }, s4: { ctx: 47, cost: 0.66 },
+    s5: { ctx: 91, cost: 4.80 }, s6: { ctx: 12, cost: 0.05 }, s4: { ctx: 47, cost: 0.66 }, s9: { ctx: 33, cost: 3.10 },
     s7: { ctx: 71, cost: 6.20, agents: { b1: "running", b2: "running", b3: "idle", b4: "running" } } };
   const ORIG = { s1: "iterm", s2: "vscode-panel", s3: "desktop", s5: "terminal", s6: "vscode-terminal", s4: "headless", s7: "desktop" };
   const withLive = r => { r.sessions.forEach(s => {

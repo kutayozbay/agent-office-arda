@@ -138,6 +138,12 @@ asks for a permission, its turn ends, it errors); then it walks back in. Right-c
 effort, how full its context is, what it has cost and its subagents' states, plus your plan usage
 (the weekly window, and when it resets). Click a row to open that session.
 
+**Cost by repo** adds up the sessions that did something today (the hook heard from them since
+midnight), grouped by folder the same way as the shirt colours, most expensive first, with a total.
+The mod reports what a session has cost since it started, not per day, so a session that began
+yesterday and is still in use counts in full; sessions with nothing since midnight are left out
+(the note under it says how many). Without the mod's cost the section is not shown.
+
 ![The stats screen: plan usage, totals, and one row per session](docs/stats.png)
 
 ### Companion mod (optional): context, cost, plan usage

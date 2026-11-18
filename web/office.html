@@ -176,6 +176,7 @@ const DONE_FRESH = 30 * 60;           // "done, your turn" for this long, then p
 const CRASH_FRESH = 30 * 60;          // "stopped with an error" for this long, then plain idle: an error the
                                       // network caused (a Wi-Fi switch, a VPN) is not worth a "needs you" for hours
 const STALL_AFTER = 10 * 60;          // working with no heartbeat this long reads as stalled
+const WAIT_WARN = 10 * 60, WAIT_LATE = 30 * 60;   // waiting for you this long turns orange, then red
 const WALL = 16;                      // height of a room's back wall, in art pixels
 const SHELF_MAX = 5;                  // finished reviews on the review room's shelf, at most
 let snap = null, hits = [], frame = 0, energy = false;
@@ -227,6 +228,14 @@ function agentsOf(s) {
 }
 function esc(s) { return String(s).replace(/[<&"]/g, c => ({ "<": "&lt;", "&": "&amp;", '"': "&quot;" })[c]); }
 
+// How long a session has waited for you: the hook sets since when its state changes, so for a
+// waiting session it is when it asked. Amber, then orange after WAIT_WARN, red after WAIT_LATE.
+function waitColor(sec) { return sec >= WAIT_LATE ? "#e06c6c" : sec >= WAIT_WARN ? "#f0884a" : "#ffb347"; }
+function longestWait() {
+  let w = null;
+  for (const s of snap.all) if (shown(s) === "waiting" && s.since && (!w || s.since < w.since)) w = s;
+  return w;
+}
 // What a session shows: its recorded state, with time taken into account.
 function shown(s) {
   if (s.state === "working" && s.beat && snap.now - s.beat > STALL_AFTER) return "stalled";
@@ -776,8 +785,9 @@ function draw() {
     24 * P, (oy + WALL + 8) * P, "#d9cfc3", 10);
   for (const c of L.cells) {
     const s = c.s, x = c.x, y = c.y, st = shown(s), tk = team(s.cwd), cx = x + 26;
+    const waited = st === "waiting" && s.since ? snap.now - s.since : null;
     if (st === "waiting" || st === "crashed") {
-      const col = st === "crashed" ? "rgba(224,108,108,0.30)" : (frame % 2 ? "rgba(255,179,71,0.38)" : "rgba(255,179,71,0.18)");
+      const col = st === "crashed" ? "rgba(224,108,108,0.30)" : waitColor(waited || 0) + (frame % 2 ? "61" : "2e");
       px(x - 3, c.y + 1, L.teamW - 6, 1, col); px(x - 3, c.y + c.h - 4, L.teamW - 6, 1, col);
       px(x - 3, c.y + 1, 1, c.h - 4, col); px(x + L.teamW - 10, c.y + 1, 1, c.h - 4, col);
     }
@@ -788,6 +798,7 @@ function draw() {
     person(hp.x, hp.y, s.id, tk, st, false, hp.walking);
     desk(cx - 9, y + 23, 18, st === "working" || st === "compacting" || st === "background" ? "on" : st === "waiting" ? "wait" : st === "crashed" ? "err" : "off", false, hash(s.id));
     if (!hp.walking && st !== "working") bubble(cx + 5, y + 1, st);
+    if (waited != null && !hp.walking) label("⏳" + mins(waited), (cx + 14) * P, (y + 2) * P, waitColor(waited), 10);
     // subagents: their own row of small desks under the head agent
     subs.slice(0, 3).forEach((a, j) => {
       const wx = x + j * 18, wy = y + 33, aid = a.id;
@@ -818,7 +829,7 @@ function draw() {
       text(t, gx + gw + 4, gy - 2.5, ctxColor(pct), 9);
     }
     hits.push({ x: (x - 3) * P, y: y * P, w: (L.teamW - 6) * P, h: (c.h - 3) * P, session: s,
-      tip: `${s.title || "untitled"}\n${s.cwd}\n${STATE_WORD[st] || st}${ago ? " for " + ago : ""}` +
+      tip: `${s.title || "untitled"}\n${s.cwd}\n${STATE_WORD[st] || st}${ago ? " for " + ago : ""}${waited != null ? " (since " + hhmm(s.since) + ")" : ""}` +
         (st === "crashed" ? `\nits turn ended on an API error at ${hhmm(s.since)} (a network drop does this);\nsend it a message to carry on. Clears by itself after ${CRASH_FRESH / 60} min.` : "") +
         (s.model ? `\n${modelName(s.model)}${s.effort ? ", effort " + s.effort : ""}` : "") +
         (pct != null ? `\ncontext ${Math.round(pct)}%${s.live.costUsd != null ? " · $" + s.live.costUsd.toFixed(2) : ""}` : "") +
@@ -1343,9 +1354,15 @@ function drawManager(L) {
   if (c.needs) parts.push(`${c.needs} need${c.needs === 1 ? "s" : ""} you`);
   if (c.working) parts.push(`${c.working} working`);
   label(parts.join(" · ") || "all quiet", m.cx * P, (m.deskY + 15.5) * P, c.needs ? "#ffc370" : "#f1ebe2", 12, "center");
+  let ly = m.deskY + 21;
+  const lw = longestWait(), lwt = lw && mins(snap.now - lw.since);
+  if (lw) {
+    const room = Math.floor(mw * P / 6.2) - 18 - lwt.length;
+    label(`longest wait: ${clip(lw.title || "untitled", Math.max(4, room))} ${lwt}`, m.cx * P, (ly - 0.5) * P, waitColor(snap.now - lw.since), 10, "center");
+    ly += 6;
+  }
   const wk = lim.find(l => l.kind === "seven_day");
   // plan usage as batteries: what is LEFT of each window, draining as you use it
-  let ly = m.deskY + 21;
   const rows = [[wk, "week", 4]].filter(r => r[0]);
   for (const [l, name, h] of rows) { battery(m.cx - (L.mw < 76 ? 0 : 3), ly, name, l.percentUsed, h, L.mw < 76); ly += h + 2; }
   if (!rows.length) { label("plan usage: needs the mod", m.cx * P, (ly + 1) * P, "#8ea3ad", 10, "center"); ly += 6; }
@@ -1357,7 +1374,7 @@ function drawManager(L) {
     m.cx * P, ly * P, "#d9cfc3", 10, "center");
   const tipLim = lim.map(l => `${LIMIT_NAME[l.kind] || l.kind}: ${l.percentUsed}%`).join(" · ");
   hits.push({ x: 0, y: 0, w: mw * P, h: L.reviewH * P, stats: true,
-    tip: `${snap.manager.name || "Manager"}\n${c.needs} need you · ${c.working} working · ${c.done} done · ${snap.lounge.length} on a break` + (tipLim ? `\n${tipLim}` : "") + `\n${snap.all.reduce((t, s) => t + agentsOf(s).length, 0)} subagents running\nclick: stats`});
+    tip: `${snap.manager.name || "Manager"}\n${c.needs} need you · ${c.working} working · ${c.done} done · ${snap.lounge.length} on a break` + (lw ? `\nlongest wait: ${lw.title || "untitled"}, ${lwt} (since ${hhmm(lw.since)})` : "") + (tipLim ? `\n${tipLim}` : "") + `\n${snap.all.reduce((t, s) => t + agentsOf(s).length, 0)} subagents running\nclick: stats`});
 }
 
 
@@ -1944,7 +1961,7 @@ if (!bridge) {
       { id: "s8", kind: "session", model: "claude-sonnet-5-5", effort: "medium", title: "Release notes", cwd: "/Users/me/code/web-app", state: "idle", since: t0 - 3000, beat: t0 - 3000, subagents: {} },
       { id: "s9", kind: "session", model: "claude-opus-5-5", effort: "high", title: "Onboarding docs", cwd: "/Users/me/code/docs", state: "idle", since: t0 - 5000, beat: t0 - 5000, subagents: {} },
       { id: "s10", kind: "session", model: "claude-haiku-5-5", effort: "low", title: "Log cleanup", cwd: "/Users/me/code/infra", state: "idle", since: t0 - 4000, beat: t0 - 4000, subagents: {} },
-      { id: "s11", kind: "session", model: "claude-sonnet-5-5", effort: "high", title: "Cache warmup", cwd: "/Users/me/code/engine", state: "done", since: t0 - 4000, beat: t0 - 4000, subagents: {} },
+      { id: "s11", kind: "session", model: "claude-sonnet-5-5", effort: "high", title: "Cache warmup", cwd: "/Users/me/code/engine", state: "waiting", since: t0 - 1400, beat: t0 - 1400, subagents: {} },
       { id: "s12", kind: "session", model: "claude-opus-5-5", effort: "high", title: "API sketch", cwd: "/Users/me/code/web-app", state: "idle", since: t0 - 7000, beat: t0 - 7000, subagents: {} },
       { id: "s4", kind: "automation", model: "claude-sonnet-5-5", effort: "high", title: "clean-reports: infra", cwd: "/Users/me/code/infra", state: "compacting", since: t0 - 120, beat: Date.now() / 1000, subagents: {} },
     ],

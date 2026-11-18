@@ -57,7 +57,7 @@ Missing a prerequisite: `xcode-select --install` for the command-line tools, `br
 
   | bubble | means |
   |---|---|
-  | **!** orange, blinking | waiting for your permission |
+  | **!** orange, blinking | waiting for your permission; **⏳ 12m** beside it says for how long, and it and the desk's frame turn from amber to orange after 10 minutes, red after 30 |
   | **✓** | done, your turn (for 30 minutes after its turn ends) |
   | **×** | its turn ended on an API error, often a network drop (for 30 minutes, then idle; send it a message to carry on) |
   | **hourglass** | its turn is over but subagents it started in the background are still running |
@@ -68,7 +68,8 @@ Missing a prerequisite: `xcode-select --install` for the command-line tools, `br
 - **Manager's room** (optional, top left): you, at your desk. A screen on the wall counts the
   sessions that need you, are working or are done, with your weekly plan usage when
   the companion mod reports it; an orange **!** over your head when someone needs you. Under the
-  desk: who needs you and who is working, your weekly usage as a battery that drains
+  desk: who needs you and who is working, the session that has waited longest for you
+  (`longest wait: Checkout flow 23m`, in the same colours as its ⏳), your weekly usage as a battery that drains
   as you use it (orange, then red and blinking as they run low), when the week resets, and
   what the open sessions have cost. Click it
   for the stats screen. **✎ edit** under its window sets your name and picture (also in

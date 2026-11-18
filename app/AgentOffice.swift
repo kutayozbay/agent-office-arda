@@ -108,12 +108,15 @@ func alive(_ pid: Int) -> Bool { pid > 0 && (kill(pid_t(pid), 0) == 0 || errno =
 func lines(_ path: String, tailBytes: Int = 0) -> [String] {
     guard let fh = FileHandle(forReadingAtPath: path) else { return [] }
     defer { try? fh.close() }
-    if tailBytes > 0, let end = try? fh.seekToEnd(), end > UInt64(tailBytes) {
-        try? fh.seek(toOffset: end - UInt64(tailBytes))
+    // seekToEnd leaves the handle at the end: a file no longer than tailBytes is read from the start
+    var cut = false
+    if tailBytes > 0, let end = try? fh.seekToEnd() {
+        cut = end > UInt64(tailBytes)
+        try? fh.seek(toOffset: cut ? end - UInt64(tailBytes) : 0)
     }
     let data = (try? fh.readToEnd()) ?? Data()
     var out = String(decoding: data, as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
-    if tailBytes > 0, !out.isEmpty { out.removeFirst() }   // the first line may be cut in half
+    if cut, !out.isEmpty { out.removeFirst() }   // the first line may be cut in half
     return out
 }
 

@@ -101,7 +101,10 @@ Missing a prerequisite: `xcode-select --install` for the command-line tools, `br
   control Spotify (if you said no, the tooltip says where to change it: System Settings → Privacy
   & Security → Automation).
 - **Review room** (optional): one desk per PR-review slot with repo, PR, owner and how long it has
-  been running, and a sofa for the queue. A review running longer than `overdueMinutes` (45 by
+  been running, and a sofa for the queue. On a low table in front of the sofa, an in-tray holds
+  what waits for your 👍/👎 on Slack: its stack grows with the count, amber with a number when
+  something is there, empty when nothing is. Hover it for the list; a click opens the first PR,
+  a right-click any of them. A review running longer than `overdueMinutes` (45 by
   default) gets a red frame and a ⚠ by its time: it may be stuck. A shelf along the front holds the
   last finished reviews, newest first (up to 5, fewer on a narrow window): PR, how long ago, and
   the result and cost when the reviewer logs them; green posted, amber asked you on Slack, grey
@@ -462,6 +465,10 @@ file, not in the repository. Every key is optional.
     slug, PR number, commit, author, start time `HH:MM`, pid, title);
   - `<state>/queue`: one line per waiting PR (repo name, slug, number, commit, author,
     `auto`/`manual`, title);
+  - `<state>/waiting` (optional): one line per PR waiting for your decision on Slack (repo name,
+    slug, number, `approve` or `request`, since when in unix seconds, author, title). `approve` is a
+    finished review that is posted after your 👍, `request` a small PR that is reviewed if you 👍
+    it. No file, nothing waiting;
   - a log whose lines look like `YYYY-MM-DD HH:MM:SS [pr-watch] <repo>#<pr>: …`. A line whose
     event is `posted comment`, `asked you on Slack`, `rejected on Slack` or starts with `FAILED`
     is a finished review and goes on the shelf. After the event, optional ` | key: value` fields

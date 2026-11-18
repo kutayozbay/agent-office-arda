@@ -2,7 +2,7 @@
 //
 // The window hosts web/office.html (bundled as a resource) and hands it a snapshot every
 // couple of seconds: the Claude sessions the hook records (hook/agent-office-hook.sh), and,
-// when configured, a PR-review queue (a pr-watch layout: running/, queue, a log file).
+// when configured, a PR-review queue (a pr-watch layout: running/, queue, waiting, a log file).
 // Nothing runs while the app is closed except the hook itself; there is no server and no port.
 //
 // Configuration: ~/.config/agent-office/config.json, every key optional:
@@ -197,7 +197,7 @@ func snapshot(_ cfg: Config) -> [String: Any] {
             try? fm.removeItem(atPath: p)
         }
     }
-    var reviews: [String] = [], queue: [String] = [], reviewLog: [String] = []
+    var reviews: [String] = [], queue: [String] = [], waiting: [String] = [], reviewLog: [String] = []
     if let rs = cfg.reviewState {
         for name in (try? fm.contentsOfDirectory(atPath: rs + "/running")) ?? [] {
             guard let l = lines(rs + "/running/" + name).first else { continue }
@@ -205,11 +205,12 @@ func snapshot(_ cfg: Config) -> [String: Any] {
             if f.count >= 7, let pid = Int(f[6]), alive(pid) { reviews.append(l) }
         }
         queue = lines(rs + "/queue")
+        waiting = lines(rs + "/waiting")                  // waiting for your 👍/👎 on Slack; no file: none
     }
     if let rl = cfg.reviewLog { reviewLog = lines(rl, tailBytes: 24_000) }
     return [
         "now": now, "slots": cfg.slots, "overdueMinutes": cfg.overdueMinutes, "workspace": cfg.workspace,
-        "sessions": sessions, "reviews": reviews, "queue": queue,
+        "sessions": sessions, "reviews": reviews, "queue": queue, "waiting": waiting,
         "officeEvents": Array(lines(cfg.officeState + "/events.log", tailBytes: 16_000).suffix(60)),
         "reviewLog": Array(reviewLog.suffix(120)),
         "manager": ["name": cfg.managerName, "image": managerImageURL(cfg.managerImage)],

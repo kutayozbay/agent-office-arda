@@ -289,6 +289,9 @@ function build(raw) {
     .map(f => ({ name: f[0], slug: f[1], id: f[2], author: f[4], started: f[5], title: f[7] }));
   const queue = (raw.queue || []).map(l => l.split("\t")).filter(f => f.length >= 7)
     .map(f => ({ name: f[0], slug: f[1], id: f[2], author: f[4], manual: f[5] === "manual", title: f[6] }));
+  // waiting for your 👍/👎 on Slack: a finished review before it is posted (approve), or a small PR (request)
+  const waiting = (raw.waiting || []).map(l => l.split("\t")).filter(f => f.length >= 7)
+    .map(f => ({ name: f[0], slug: f[1], id: f[2], kind: f[3], since: +f[4] || 0, author: f[5], title: f[6] }));
   const sessions = (raw.sessions || []).filter(s => s && s.id);
   const reviewRepos = new Set(reviews.map(r => r.name));
   const manualReviews = sessions.filter(s => s.kind === "review" && !reviewRepos.has((s.cwd || "").split("/").pop()));
@@ -328,7 +331,7 @@ function build(raw) {
   energy = !!(raw.settings && raw.settings.energySaver);
   if (raw.settings && raw.settings.welcome && !welcomeSeen) showWelcome();
   if (raw.jukebox) loadJukeArt(raw.jukebox);
-  return { now: raw.now || Date.now() / 1000, reviews, queue, manualReviews, all, others: visible.slice(0, MAX_SESSIONS),
+  return { now: raw.now || Date.now() / 1000, reviews, queue, waiting, manualReviews, all, others: visible.slice(0, MAX_SESSIONS),
            overflow: Math.max(0, visible.length - MAX_SESSIONS), hiddenCount: all.filter(s => at.get(s.id) === "hidden").length, lounge,
            events, finished: shelf, workspace: raw.workspace || "", slots: raw.slots || 5, overdue: raw.overdueMinutes ?? 45, jukebox: raw.jukebox || null,
            manager: raw.manager && (raw.manager.image || raw.manager.name || raw.manager.hasImage) ? raw.manager : null,
@@ -513,6 +516,13 @@ function lowShelf(x, y, w) {       // (x, y) = top-left of the board the finishe
   px(x, y + 2, w, 3, "#9b7350"); px(x + 1, y + 3, w - 2, 1, "#8a6445");
   px(x + 1, y + 5, 2, 2, "#7a5a3e"); px(x + w - 3, y + 5, 2, 2, "#7a5a3e");   // feet
   px(x + 3, y + 5, w - 6, 1, "#00000038");
+}
+function trayTable(x, y, n) {      // (x, y) = top-left of a low table; an in-tray on it with n papers (5 drawn at most)
+  px(x, y, 16, 2, "#c49a6c"); px(x, y, 16, 1, "#dab387"); px(x, y + 2, 16, 1, "#9b7350");
+  px(x + 1, y + 3, 2, 3, "#7a5a3e"); px(x + 13, y + 3, 2, 3, "#7a5a3e"); px(x + 2, y + 6, 12, 1, "#00000038");
+  for (let j = 0; j < Math.min(n, 5); j++) px(x + 4 + (j % 3 === 1 ? 1 : 0), y - 2 - j, 8, 1, j % 2 ? "#e6dfd2" : "#f4efe4");
+  const rim = n ? "#ffb347" : "#8a8096";
+  px(x + 3, y - 1, 10, 1, rim); px(x + 3, y - 3, 1, 2, rim); px(x + 12, y - 3, 1, 2, rim);
 }
 function sofaBack(x, y, w) { px(x, y, w, 7, "#6f5a8f"); px(x, y, w, 1, "#8873a8"); }
 function sofaFront(x, y, w) {
@@ -746,6 +756,24 @@ function draw() {
   sofaFront(sx, 44, sw);
   if (snap.queue.length > fit) label(`+${snap.queue.length - fit}`, (sx + sw / 2) * P, 59 * P, "#bdb3a8", 9, "center");
   if (!snap.queue.length) label("nobody", (sx + sw / 2) * P, 59 * P, "#8ea3ad", 9, "center");
+  // the in-tray on a low table in front of the sofa: what waits for your 👍/👎 on Slack
+  const tx = sx + 2, ty = 70, wn = snap.waiting.length;
+  trayTable(tx, ty, wn);
+  if (wn) {
+    g.font = "9px Menlo, monospace";
+    const room = (L.cols - 10 - tx - 17) * P, say = g.measureText(`${wn} for you`).width + 6 <= room ? `${wn} for you` : String(wn);
+    label(say, (tx + 17) * P, (ty - 4) * P, "#ffc370", 9);
+  }
+  const wurl = w => snap.workspace ? `https://bitbucket.org/${snap.workspace}/${w.slug}/pull-requests/${w.id}` : "";
+  const wtip = snap.waiting.map(w => { const age = snap.now - w.since;
+    return `${w.name}#${w.id} · ${w.kind} · ${(age >= 86400 ? Math.floor(age / 86400) + "d" : mins(age)) + " ago"} · ${w.title}`; });
+  hits.push({ x: tx * P, y: (ty - 8) * P, w: (L.cols - 10 - tx) * P, h: 15 * P, url: wn ? wurl(snap.waiting[0]) : "",
+    waiting: snap.waiting.filter(wurl).map(w => [`${w.name}#${w.id}`, wurl(w)]),
+    tip: wn ? `${wn} waiting for you on Slack\n` + wtip.join("\n") +
+      (snap.waiting.some(w => w.kind === "approve") ? "\napprove: a finished review, posted after your 👍" : "") +
+      (snap.waiting.some(w => w.kind === "request") ? "\nrequest: a small PR, reviewed if you 👍 it" : "") +
+      (wurl(snap.waiting[0]) ? `\nclick: open ${snap.waiting[0].name}#${snap.waiting[0].id}` + (wn > 1 ? " · right-click: open another" : "") : "")
+      : "Nothing waiting for your 👍/👎 on Slack" });
   // the shelf: finished reviews, newest first, as many as fit side by side (fewer on a narrow window)
   if (L.shelf) {
     const S = L.shelf, head = S.w >= 120 ? 15 : 0, k = Math.min(snap.finished.length, Math.floor((S.w - head) / 46));
@@ -1823,7 +1851,8 @@ document.addEventListener("contextmenu", ev => {
     if (rel) items.push(["Back to the desk", () => backToDesk(h.session)]);
     else if (!h.lounge) items.push(["Release to the lounge", () => hideSession(h.session, true)]);
     items.push(["Hide from view", () => hideSession(h.session)]);
-  } else if (h && h.url) { head = h.tip.split("\n")[0]; items.push(["Open the PR", () => act(h)]); }
+  } else if (h && h.waiting && h.waiting.length) { head = h.tip.split("\n")[0]; for (const [pr, url] of h.waiting) items.push([`Open ${pr}`, () => act({ url })]); }
+  else if (h && h.url) { head = h.tip.split("\n")[0]; items.push(["Open the PR", () => act(h)]); }
   const hs = Object.values(hidden).filter(x => !x.release);
   if (hs.length) {
     items.push([`Show hidden agents (${hs.length})`, unhideAll]);
@@ -1932,6 +1961,9 @@ if (!bridge) {
     queue: [["infra", "infra", "109", "x", "Jordan K.", "auto", "Notifications table index"],
             ["web-app", "web-app", "464", "x", "Jordan K.", "manual", "Expire old generation rows"],
             ["deploy-scripts", "deploy-scripts", "217", "x", "Riley M.", "auto", "Rollout surge settings"]].map(f => f.join("\t")),
+    waiting: [["infra", "infra", "118", "approve", Math.floor(t0 - 27 * 60), "Sam R.", "Retry policy for the webhook worker"],
+              ["docs", "docs", "43", "request", Math.floor(t0 - 50 * 60), "Riley M.", "Fix broken links in the setup guide"],
+              ["web-app", "web-app", "469", "request", Math.floor(t0 - 130 * 60), "Jordan K.", "Bump the date library"]].map(f => f.join("\t")),
     sessions: [
       { id: "s1", kind: "session", model: "claude-opus-5-5", effort: "high", title: "Checkout flow refactor", cwd: "/Users/me/code/deploy-scripts", state: "working", since: t0 - 300, beat: Date.now() / 1000,
         subagents: tick % 6 > 1 ? { a1: { type: "Explore" }, a2: { type: "general-purpose" } } : { a1: { type: "Explore" } } },

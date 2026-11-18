@@ -21,6 +21,7 @@
 import Cocoa
 import WebKit
 import ServiceManagement
+import UserNotifications
 
 let home = FileManager.default.homeDirectoryForCurrentUser.path
 /// "agent-office", or "agent-office-dev" in the dev app (scripts/build-app.sh --dev): its own config
@@ -37,6 +38,7 @@ struct Config {
     var slots = 5
     var overdueMinutes = 45                               // a review desk running longer is flagged; 0: never
     var workspace = ""
+    var planLowPercent = 20                               // under this % of the week left: a warning; 0: never
     var managerName = ""
     var managerImage = ""
     var room = RoomConfig()
@@ -87,6 +89,7 @@ struct Config {
         guard let data = try? Data(contentsOf: url),
               let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return c }
         if let s = j["officeState"] as? String { c.officeState = expand(s) }
+        if let n = j["planLowPercent"] as? Int { c.planLowPercent = max(0, min(100, n)) }
         if let r = j["reviews"] as? [String: Any] {
             if let s = r["state"] as? String { c.reviewState = expand(s) }
             if let s = r["log"] as? String { c.reviewLog = expand(s) }
@@ -211,6 +214,7 @@ func snapshot(_ cfg: Config) -> [String: Any] {
         "now": now, "slots": cfg.slots, "overdueMinutes": cfg.overdueMinutes, "workspace": cfg.workspace,
         "sessions": sessions, "reviews": reviews, "queue": queue,
         "officeEvents": Array(lines(cfg.officeState + "/events.log", tailBytes: 16_000).suffix(60)),
+        "planLowPercent": cfg.planLowPercent,
         "reviewLog": Array(reviewLog.suffix(120)),
         "manager": ["name": cfg.managerName, "image": managerImageURL(cfg.managerImage)],
         "roomLabels": cfg.roomLabels,
@@ -433,6 +437,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         }
     }
 
+    /// The weekly plan dropped under "planLowPercent" left: a notification, and "Sosumi" with
+    /// "Play a sound" on (played here, so it sounds even when notifications are turned off).
+    func planLowNotice(left: String, resets: String) {
+        if sound { NSSound(named: "Sosumi")?.play() }
+        let c = UNUserNotificationCenter.current()
+        c.delegate = self
+        c.requestAuthorization(options: [.alert]) { ok, _ in
+            guard ok else { return }
+            let n = UNMutableNotificationContent()
+            n.title = "Weekly plan: \(left)% left"
+            n.body = resets.isEmpty ? "Your weekly plan usage is running low." : "The week \(resets)."
+            c.add(UNNotificationRequest(identifier: "plan-low", content: n, trigger: nil))
+        }
+    }
+
     func watchExits(_ snap: [String: Any]) {
         let pids = Set(((snap["sessions"] as? [[String: Any]]) ?? []).compactMap { $0["pid"] as? Int }.filter { $0 > 0 })
         for (pid, src) in exitWatch where !pids.contains(pid) { src.cancel(); exitWatch[pid] = nil }
@@ -451,6 +470,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         if let h = body["hidden"], h.utf8.count < 64_000 { defaults.set(h, forKey: "hidden") }
         if let kind = body["chime"], sound {
             NSSound(named: kind == "waiting" ? "Glass" : "Pop")?.play()
+        }
+        // the weekly plan ran low: once per week window, remembered across launches
+        if let left = body["planLow"], let win = body["window"], defaults.string(forKey: "planLowWindow") != win {
+            defaults.set(win, forKey: "planLowWindow")
+            planLowNotice(left: left, resets: body["resets"] ?? "")
         }
         if let u = body["open"], let url = URL(string: u), url.scheme == "https" { NSWorkspace.shared.open(url) }
         if let p = body["reveal"], FileManager.default.fileExists(atPath: p) {

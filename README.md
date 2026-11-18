@@ -70,7 +70,11 @@ Missing a prerequisite: `xcode-select --install` for the command-line tools, `br
   the companion mod reports it; an orange **!** over your head when someone needs you. Under the
   desk: who needs you and who is working, your weekly usage as a battery that drains
   as you use it (orange, then red and blinking as they run low), when the week resets, and
-  what the open sessions have cost. Click it
+  what the open sessions have cost. Under 20% of the week left (`planLowPercent`, see
+  *Configuration*) the battery, the wall screen's bar and the reset line turn red and blink (the
+  stats screen's bar too), and the app shows one notification for that week ("Weekly plan: 17%
+  left"), with a sound when **Play a sound** is on, the first time the window is on screen after
+  the drop. It does not notify again until the next week's window. Click it
   for the stats screen. **✎ edit** under its window sets your name and picture (also in
   Settings, and Agent Office → Your Name and Picture…); the picture is copied next to the config,
   and a teammate in your shared room sees the change at once. Saving makes it the manager right
@@ -388,7 +392,8 @@ Agent Office → Settings… (⌘,):
 
 The rest are off by default:
 - **Keep on top**: float the window above other apps and across Spaces.
-- **Play a sound**: "Glass" when an agent waits for your permission, "Pop" when one finishes.
+- **Play a sound**: "Glass" when an agent waits for your permission, "Pop" when one finishes,
+  "Sosumi" once a week when the weekly plan runs low.
 - **Energy saver**: 2 redraws a second instead of 6, no walking or blinking.
 
 The window remembers its size and position. **Check Setup…** in the same menu says whether the
@@ -438,6 +443,7 @@ file, not in the repository. Every key is optional.
 
 ```json
 { "officeState": "~/.local/state/agent-office",
+  "planLowPercent": 20,
   "manager": { "name": "Alex", "image": "~/agent-office/local/manager.png" },
   "room": { "name": "team-lounge", "password": "<password>", "host": false, "alwaysJoin": true,
             "address": "10.20.30.40" },
@@ -457,6 +463,9 @@ file, not in the repository. Every key is optional.
   manager sits there. `local/` in the repository is ignored by git: a good place to keep the
   picture. `AGENT_OFFICE_MANAGER_IMAGE` and `AGENT_OFFICE_MANAGER_NAME` override both keys, until
   **✎ edit** saves a new name and picture: that takes those two lines out of the env file.
+- **`planLowPercent`** (default 20, `0` turns it off): under this share of the week left, the
+  manager's room shows the weekly plan as low and the app notifies you once for that week. It
+  needs the companion mod's plan usage; without it nothing changes.
 - **`reviews`** feeds the review room from a PR reviewer that keeps:
   - `<state>/running/<repo>-<pr>`: one tab-separated line per review in progress (repo name, repo
     slug, PR number, commit, author, start time `HH:MM`, pid, title);

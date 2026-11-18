@@ -1248,6 +1248,20 @@ function planLimits() {
   }
   return [...best.values()];
 }
+// the weekly window with less than PLAN_LOW % left ("planLowPercent" in the config file; 0: never)
+const PLAN_LOW = 20;
+function weekLow(l) { return !!l && l.kind === "seven_day" && 100 - (l.percentUsed || 0) < ((lastRaw || {}).planLowPercent ?? PLAN_LOW); }
+// Crossing it tells the app once per week window (the app remembers it across launches): it shows
+// a notification, and plays a sound with "Play a sound" on.
+let planAlerted = "";
+function planAlert() {
+  const wk = planLimits().find(weekLow);
+  if (!bridge || !wk || !wk.resetsAt) return;
+  const win = String(Math.round((Date.parse(wk.resetsAt) || 0) / 3600e3));
+  if (win === planAlerted) return;
+  planAlerted = win;
+  bridge.postMessage({ planLow: String(Math.round(100 - wk.percentUsed)), window: win, resets: untilText(wk.resetsAt) });
+}
 function managerCounts() {
   const st = snap.all.map(shown), n = k => st.filter(x => k.includes(x)).length;
   return { needs: n(["waiting", "crashed"]), working: n(["working", "compacting", "background"]), done: n(["done"]) };
@@ -1299,15 +1313,15 @@ function paintManager(L, sky) {
   text(clip(name, Math.floor((pw - 4) * P / 5.6)), m.cx * P, (deskY + 5.6) * P, "#2a1d12", 9, "center", "bold");
 }
 // a small battery for one plan window, centred on cx: the charge is what is left and shrinks
-// smoothly, a hair per percent; it turns orange under 40% and red, blinking, under 15%
-function battery(cx, y, name, used, h, short) {
-  const left = Math.max(0, Math.min(100, 100 - (used || 0))), w = 22, x = cx - 10;
-  const c = left > 40 ? "#5fbf7f" : left > 15 ? "#f0a35e" : "#e06c6c";
+// smoothly, a hair per percent; it turns orange under 40% and red, blinking, under 15% (or low)
+function battery(cx, y, name, used, h, short, low) {
+  const left = Math.max(0, Math.min(100, 100 - (used || 0))), w = 22, x = cx - 10, red = low || left <= 15;
+  const c = red ? "#e06c6c" : left > 40 ? "#5fbf7f" : "#f0a35e";
   g.fillStyle = "#17131bcc"; g.fillRect((x - 11) * P, (y - 1) * P, (w + (short ? 22 : 29)) * P, (h + 2) * P);
   text(name, (x - 2) * P, (y + h / 2) * P - 5, "#d9cfc3", 10, "right");
   px(x, y, w, h, "#d9cfc3"); px(x + 1, y + 1, w - 2, h - 2, "#2a2530"); px(x + w, y + 1, 1, h - 2, "#d9cfc3");
   const inner = (w - 2) * P, fill = Math.round(inner * left / 100 * 2) / 2;
-  if (fill > 0 && !(left <= 15 && frame % 2 && !energy)) {
+  if (fill > 0 && !(red && frame % 2 && !energy)) {
     g.fillStyle = c; g.fillRect((x + 1) * P, (y + 1) * P, fill, (h - 2) * P);
     g.fillStyle = shade(c, 0.25); g.fillRect((x + 1) * P, (y + 1) * P, fill, 1.5);
   }
@@ -1324,7 +1338,7 @@ function drawManager(L) {
     const k = l.kind === "five_hour" ? "5h" : l.kind === "seven_day" ? "7d" : l.kind.slice(0, 2), bw = (sw - 14) * P;
     text(k, sx, ry, "#9fd3c0", 9);
     g.fillStyle = "#24302c"; g.fillRect(sx + 16, ry + 3, bw, 4);
-    g.fillStyle = ctxColor(l.percentUsed); g.fillRect(sx + 16, ry + 3, Math.max(1, bw * Math.min(100, l.percentUsed) / 100), 4);
+    g.fillStyle = weekLow(l) ? "#e06c6c" : ctxColor(l.percentUsed); g.fillRect(sx + 16, ry + 3, Math.max(1, bw * Math.min(100, l.percentUsed) / 100), 4);
     text(l.percentUsed + "%", sx + 19 + bw, ry, "#d9f2e8", 9);
   }
   // without a picture: a drawn manager, twice the size of everyone else
@@ -1347,9 +1361,9 @@ function drawManager(L) {
   // plan usage as batteries: what is LEFT of each window, draining as you use it
   let ly = m.deskY + 21;
   const rows = [[wk, "week", 4]].filter(r => r[0]);
-  for (const [l, name, h] of rows) { battery(m.cx - (L.mw < 76 ? 0 : 3), ly, name, l.percentUsed, h, L.mw < 76); ly += h + 2; }
+  for (const [l, name, h] of rows) { battery(m.cx - (L.mw < 76 ? 0 : 3), ly, name, l.percentUsed, h, L.mw < 76, weekLow(l)); ly += h + 2; }
   if (!rows.length) { label("plan usage: needs the mod", m.cx * P, (ly + 1) * P, "#8ea3ad", 10, "center"); ly += 6; }
-  if (wk && wk.resetsAt) { label("week " + untilText(wk.resetsAt), m.cx * P, (ly + 0.5) * P, "#bdb3a8", 10, "center"); ly += 6; }
+  if (wk && wk.resetsAt) { label((weekLow(wk) ? "⚠ week " : "week ") + untilText(wk.resetsAt), m.cx * P, (ly + 0.5) * P, weekLow(wk) ? (frame % 2 && !energy ? "#e06c6c" : "#ff9a94") : "#bdb3a8", 10, "center"); ly += 6; }
   const lives = snap.all.map(s => s.live).filter(Boolean), cost = lives.reduce((t, l) => t + (l.costUsd || 0), 0);
   ly += 0.5;
   if (lives.length) { label("$" + cost.toFixed(2) + " spent", m.cx * P, ly * P, "#e3c74f", 10, "center"); ly += 6; }
@@ -1873,7 +1887,7 @@ function renderStats() {
   const subsN = all.reduce((t, s) => t + agentsOf(s).length, 0);
   let h = `<h2>PLAN USAGE</h2>`;
   h += limits.length ? `<div class="cards">${limits.map(l => `<div class="card"><small>${esc(LIMIT_NAME[l.kind] || l.kind)}</small>
-      <b>${l.percentUsed}%</b>${bar(l.percentUsed, ctxColor(l.percentUsed))}<small>${esc(untilText(l.resetsAt))}</small></div>`).join("")}</div>`
+      <b>${l.percentUsed}%</b>${bar(l.percentUsed, weekLow(l) ? "#e06c6c" : ctxColor(l.percentUsed))}<small>${esc(untilText(l.resetsAt))}</small></div>`).join("")}</div>`
     : `<div class="note">No plan usage reported yet${lives.length ? "" : " — it comes from the companion mod (see README)"}.</div>`;
   h += `<h2>RIGHT NOW</h2><div class="cards">
     <div class="card"><small>sessions</small><b>${all.length}</b></div>
@@ -1902,7 +1916,7 @@ function renderStats() {
 wrap.addEventListener("scroll", closeMenu);
 
 function refresh() { if (lastRaw) { const next = build(lastRaw); track(next); snap = next; draw(); } }
-window.updateOffice = raw => { lastRaw = raw; if (raw.manager && raw.manager.image !== undefined) loadManager(raw.manager.image); const next = build(raw); track(next); snap = next; renderStats(); };
+window.updateOffice = raw => { lastRaw = raw; if (raw.manager && raw.manager.image !== undefined) loadManager(raw.manager.image); const next = build(raw); track(next); snap = next; planAlert(); renderStats(); };
 window.addEventListener("resize", () => snap && draw());
 // At most FPS (or ENERGY_FPS) redraws a second, and none while the page is hidden.
 let lastDraw = 0;
@@ -1967,7 +1981,7 @@ if (!bridge) {
     s.origin = { app: ORIG[s.id] || "other" };
     const l = LIVE[s.id]; if (!l) return;
     s.live = { context: { percent: l.ctx }, costUsd: l.cost, updated: Date.now() / 1000,
-      rateLimits: [{ kind: "seven_day", percentUsed: 28, resetsAt: new Date(Date.now() + 4.6 * 86400e3).toISOString() }],
+      rateLimits: [{ kind: "seven_day", percentUsed: 83, resetsAt: new Date(Date.now() + 4.6 * 86400e3).toISOString() }],
       agents: Object.entries(l.agents || {}).filter(([id]) => (s.subagents || {})[id]).map(([id, st]) => ({ id, type: "general-purpose", status: st })) };
   }); return r; };
   updateOffice(withLive(demo())); setInterval(() => updateOffice(withLive(demo())), 2000);

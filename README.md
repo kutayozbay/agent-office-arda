@@ -105,7 +105,12 @@ Missing a prerequisite: `xcode-select --install` for the command-line tools, `br
   default) gets a red frame and a ⚠ by its time: it may be stuck. A shelf along the front holds the
   last finished reviews, newest first (up to 5, fewer on a narrow window): PR, how long ago, and
   the result and cost when the reviewer logs them; green posted, amber asked you on Slack, grey
-  rejected on Slack, red failed. Hover one for the details; a click opens its PR. See *Configuration*.
+  rejected on Slack, red failed. Hover one for the details; a click opens its PR. The whiteboard
+  sums up today, since midnight: reviews finished, what they cost, how long they took on average
+  from `review started` to the finished line, and the blocking and major findings in their
+  results; a number the log does not give (no `cost` fields, say) is left off. A review counts
+  once: a `posted comment` after `asked you on Slack`, with no new start, is your 👍. Hover it for
+  the details. See *Configuration*.
 - **Log strip**: general events only (session waiting for you, done, subagent started / finished,
   review started / posted).
 

@@ -206,12 +206,18 @@ func snapshot(_ cfg: Config) -> [String: Any] {
         }
         queue = lines(rs + "/queue")
     }
-    if let rl = cfg.reviewLog { reviewLog = lines(rl, tailBytes: 24_000) }
+    if let rl = cfg.reviewLog {
+        // the last 120 lines, or more when today has more (as far as the tail goes): the whiteboard counts the day
+        reviewLog = lines(rl, tailBytes: 24_000)
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+        let day = f.string(from: Date()), todays = reviewLog.reversed().prefix { $0.hasPrefix(day) }.count
+        reviewLog = Array(reviewLog.suffix(max(120, todays)))
+    }
     return [
         "now": now, "slots": cfg.slots, "overdueMinutes": cfg.overdueMinutes, "workspace": cfg.workspace,
         "sessions": sessions, "reviews": reviews, "queue": queue,
         "officeEvents": Array(lines(cfg.officeState + "/events.log", tailBytes: 16_000).suffix(60)),
-        "reviewLog": Array(reviewLog.suffix(120)),
+        "reviewLog": reviewLog,
         "manager": ["name": cfg.managerName, "image": managerImageURL(cfg.managerImage)],
         "roomLabels": cfg.roomLabels,
     ]

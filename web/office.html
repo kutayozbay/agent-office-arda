@@ -267,6 +267,55 @@ function finishedKind(event) {
   return /^FAILED/.test(event) ? "failed" : /posted comment/.test(event) ? "posted"
     : /asked you on Slack/.test(event) ? "asked" : /rejected on Slack/.test(event) ? "rejected" : "";
 }
+// The whiteboard: today's reviews (since local midnight). A review is counted once, at the first
+// finished line after its "review started"; a later posted or rejected line without a new start is
+// your answer on Slack, not another review. Its time runs from that start; cost and result are summed
+// from the lines that have them.
+function reviewDay(log, now) {
+  const mid = new Date(now * 1000); mid.setHours(0, 0, 0, 0);
+  const t0 = mid / 1000, open = new Map();
+  const d = { n: 0, posted: 0, asked: 0, failed: 0, cost: 0, costs: 0, time: 0, timed: 0, blocking: 0, major: 0, results: 0 };
+  for (const l of log) {
+    const r = reviewLine(l); if (!r) continue;
+    if (/review started/.test(r.event)) { open.set(r.pr, r.t); continue; }
+    const kind = finishedKind(r.event), start = open.get(r.pr);
+    if (!kind || kind === "rejected" || start === null) continue;
+    open.set(r.pr, null);
+    if (r.t < t0) continue;
+    const cost = parseFloat((r.fields.cost || "").replace(/[^\d.]/g, ""));
+    if (isFinite(cost)) { d.cost += cost; d.costs++; }
+    if (kind === "failed") { d.failed++; continue; }
+    d.n++; d[kind]++;
+    if (start !== undefined && r.t >= start) { d.time += r.t - start; d.timed++; }
+    if (r.fields.result) {
+      d.results++;
+      d.blocking += +((r.fields.result.match(/(\d+)\s*block/i) || [])[1] || 0);
+      d.major += +((r.fields.result.match(/(\d+)\s*major/i) || [])[1] || 0);
+    }
+  }
+  return d;
+}
+// what the whiteboard says, most important first; null without a review log (it keeps its scribbles)
+function boardNotes() {
+  const d = snap.today; if (!d) return null;
+  const notes = [{ s: `${d.n} today`, c: "#2f4f9e", b: true }];
+  if (d.costs) notes.push({ s: "$" + d.cost.toFixed(2), c: "#2e7d4f" });
+  if (d.timed) notes.push({ s: "⌀ " + mins(d.time / d.timed), c: "#5a5560" });
+  if (d.blocking) notes.push({ s: `${d.blocking} blocking`, c: "#c0392b" });
+  if (d.major) notes.push({ s: `${d.major} major`, c: "#c26a10" });
+  if (d.results && !d.blocking && !d.major) notes.push({ s: "no blockers", c: "#2e7d4f" });
+  if (d.failed) notes.push({ s: `${d.failed} failed`, c: "#c0392b" });
+  return notes;
+}
+function boardTip() {
+  const d = snap.today, of = (k, n, what) => k < n ? ` (${k} of ${n} ${what})` : "";
+  const kinds = [d.posted && d.posted + " posted", d.asked && d.asked + " asked you on Slack"].filter(Boolean).join(", ");
+  return [`Today, since midnight: ${d.n} review${d.n === 1 ? "" : "s"} finished` + (kinds ? ` (${kinds})` : ""),
+    d.failed ? `${d.failed} failed` : "",
+    d.costs ? `cost $${d.cost.toFixed(2)}` + of(d.costs, d.n + d.failed, "logged one") : "",
+    d.timed ? `${mins(d.time / d.timed)} from start to finish on average` + of(d.timed, d.n, "have their start in the log") : "",
+    d.results ? `${d.blocking} blocking, ${d.major} major found` + of(d.results, d.n, "logged a result") : ""].filter(Boolean).join("\n");
+}
 // pr-watch's log line → a general event, or null
 function reviewEvent(line) {
   const r = reviewLine(line); if (!r) return null;
@@ -325,12 +374,13 @@ function build(raw) {
   const finished = new Map();
   (raw.reviewLog || []).forEach((l, n) => { const r = reviewLine(l), kind = r && finishedKind(r.event); if (kind) finished.set(r.pr, { ...r, kind, n }); });
   const shelf = [...finished.values()].sort((a, b) => b.t - a.t || b.n - a.n).slice(0, SHELF_MAX);
+  const today = raw.reviewLog && raw.reviewLog.length ? reviewDay(raw.reviewLog, now) : null;
   energy = !!(raw.settings && raw.settings.energySaver);
   if (raw.settings && raw.settings.welcome && !welcomeSeen) showWelcome();
   if (raw.jukebox) loadJukeArt(raw.jukebox);
   return { now: raw.now || Date.now() / 1000, reviews, queue, manualReviews, all, others: visible.slice(0, MAX_SESSIONS),
            overflow: Math.max(0, visible.length - MAX_SESSIONS), hiddenCount: all.filter(s => at.get(s.id) === "hidden").length, lounge,
-           events, finished: shelf, workspace: raw.workspace || "", slots: raw.slots || 5, overdue: raw.overdueMinutes ?? 45, jukebox: raw.jukebox || null,
+           events, finished: shelf, today, workspace: raw.workspace || "", slots: raw.slots || 5, overdue: raw.overdueMinutes ?? 45, jukebox: raw.jukebox || null,
            manager: raw.manager && (raw.manager.image || raw.manager.name || raw.manager.hasImage) ? raw.manager : null,
            roomLabels: raw.roomLabels && typeof raw.roomLabels === "object" ? raw.roomLabels : {} };
 }
@@ -498,10 +548,24 @@ function bookshelf(x, y) {         // (x, y) = top-left; stands against the wall
   }
   px(x + 1, y + 17, 10, 1, "#00000035");
 }
-function whiteboard(x, y, w) {
-  px(x, y, w, 8, "#cfc8bb"); px(x + 1, y + 1, w - 2, 6, "#f7f5f0");
-  px(x + 2, y + 2, Math.floor(w / 3), 1, "#5b8def"); px(x + 2, y + 4, Math.floor(w / 2), 1, "#e06c6c");
-  px(x + w - 7, y + 2, 4, 3, "#5fbf7f"); px(x + 2, y + 8, w - 4, 1, "#9c9387");
+function whiteboard(x, y, w, notes) {
+  if (!notes) {                    // no review log: scribbles
+    px(x, y, w, 8, "#cfc8bb"); px(x + 1, y + 1, w - 2, 6, "#f7f5f0");
+    px(x + 2, y + 2, Math.floor(w / 3), 1, "#5b8def"); px(x + 2, y + 4, Math.floor(w / 2), 1, "#e06c6c");
+    px(x + w - 7, y + 2, 4, 3, "#5fbf7f"); px(x + 2, y + 8, w - 4, 1, "#9c9387");
+    return;
+  }
+  // today's reviews in marker, a few short notes to a row, three rows at most (the rest is in its tooltip)
+  px(x, y - 1, w, 13, "#cfc8bb"); px(x + 1, y, w - 2, 11, "#f7f5f0"); px(x + 2, y + 12, w - 4, 1, "#9c9387");
+  g.font = "9px Menlo, monospace";
+  const room = (w - 3) * P, sp = g.measureText(" ").width, rows = [];
+  for (const n of notes) {
+    const nw = g.measureText(n.s).width, row = rows[rows.length - 1];
+    if (row && row.w + sp + nw <= room) { row.items.push(n); row.w += sp + nw; }
+    else if (rows.length < 3 && nw <= room) rows.push({ items: [n], w: nw });
+  }
+  rows.forEach((row, r) => { let tx = (x + 1.5) * P;
+    for (const n of row.items) { text(n.s, tx, (y + 0.3 + r * 3.7) * P, n.c, 9, "left", n.b ? "bold" : ""); tx += g.measureText(n.s + " ").width; } });
 }
 function coffee(x, y) {            // (x, y) = bottom-left
   px(x, y - 3, 8, 3, "#9b7350"); px(x, y - 3, 8, 1, "#c49a6c");
@@ -536,7 +600,7 @@ function paintRooms(L) {
   for (let k = 0, nW = Math.max(1, Math.floor(deskSpan / 46)); k < nW; k++)
     windowAt(Math.round(from + (k + 0.5) * deskSpan / nW - winW / 2), 4, winW, 7, sky, 7 + k * 5);
   clock(L.bx - 10, 4);
-  whiteboard(L.bx + 4, 3, Math.max(12, Math.min(26, L.benchW - 16)));
+  whiteboard(L.bx + 4, 3, Math.max(12, Math.min(26, L.benchW - 16)), boardNotes());
   plant(L.bx - 9, WALL + 9, true);
   coffee(cols - 10, WALL + 9);
   plant(L.cols - 9, L.reviewH - 2, false);
@@ -688,7 +752,7 @@ function draw() {
   if (cv.width !== W * dpr || cv.height !== H * dpr) { cv.width = W * dpr; cv.height = H * dpr; cv.style.width = W + "px"; cv.style.height = H + "px"; }
   // the room layer, repainted only when the layout or the minute changes
   const d = new Date();
-  const key = [W, H, dpr, L.chatW, L.peopleW, d.getHours(), d.getMinutes(), mgrSrc && mgrCut ? mgrSrc.length + ":" + mgrSrc.slice(-24) : "", snap.manager ? snap.manager.name : "", snap.jukebox && snap.jukebox.available ? "juke" : "", L.shelf ? [L.shelf.x, L.shelf.y, L.shelf.w].join(",") : "", JSON.stringify(snap.roomLabels || {}), L.cells.map(c => c.x + "," + c.y + "," + c.h + c.rug).join(";")].join("|");
+  const key = [W, H, dpr, L.chatW, L.peopleW, d.getHours(), d.getMinutes(), mgrSrc && mgrCut ? mgrSrc.length + ":" + mgrSrc.slice(-24) : "", snap.manager ? snap.manager.name : "", snap.jukebox && snap.jukebox.available ? "juke" : "", L.shelf ? [L.shelf.x, L.shelf.y, L.shelf.w].join(",") : "", JSON.stringify(snap.roomLabels || {}), JSON.stringify(boardNotes()), L.cells.map(c => c.x + "," + c.y + "," + c.h + c.rug).join(";")].join("|");
   if (key !== layerKey) {
     layerKey = key; layer.width = W * dpr; layer.height = H * dpr;
     g = lctx; lctx.setTransform(dpr, 0, 0, dpr, 0, 0); lctx.imageSmoothingEnabled = false;
@@ -732,6 +796,8 @@ function draw() {
           (over ? `\n⚠ over the ${snap.overdue} min limit (reviews.overdueMinutes): it may be stuck` : "") + (dk.url ? "\nclick: open the PR" : ""), url: dk.url });
     } else text("free", cx, (y + 10) * P, "#8ea3ad", 9, "center");
   }
+  if (snap.today) { const bw = Math.max(12, Math.min(26, L.benchW - 16));
+    hits.push({ x: (L.bx + 4) * P, y: 2 * P, w: bw * P, h: 13 * P, tip: boardTip() }); }
   // waiting area: a sofa by the coffee machine
   const sx = L.bx + 3, sw = L.benchW - 16;
   label("WAITING", (sx + sw / 2) * P, (WALL + 4) * P, "#f1ebe2", 9, "center");
@@ -1950,7 +2016,10 @@ if (!bridge) {
     ],
     officeEvents: [`${Math.floor(t0 - 20)}\ts2\twaiting for you · Agent Office app`, `${Math.floor(t0 - 90)}\ts6\tstopped with an error · Flaky test hunt`,
                    `${Math.floor(t0 - 200)}\ts3\tdone, your turn · TTS latency investigation`],
-    reviewLog: [[95, "engine#88: review started"], [86, "engine#88: posted comment | result: 2 Blocking, 1 Major | cost: $1.84"],
+    reviewLog: [[240, "web-app#455: review started"], [228, "web-app#455: posted comment | result: 1 Blocking | cost: $1.12"],
+                [180, "infra#120: review started"], [161, "infra#120: posted comment | result: No blockers | cost: $0.95"],
+                [130, "engine#90: review started"], [118, "engine#90: posted comment | result: 1 Major | cost: $1.40"],
+                [95, "engine#88: review started"], [86, "engine#88: posted comment | result: 2 Blocking, 1 Major | cost: $1.84"],
                 [70, "docs#41: review started"], [64, "docs#41: FAILED"], [52, "infra#123: review started"],
                 [41, "deploy-scripts#211: posted comment | result: No blockers | cost: $0.62"], [27, "infra#118: asked you on Slack (low confidence)"],
                 [14, "web-app#466: posted comment 1001"], [13, "web-app#466: Slack notified (safe)"],

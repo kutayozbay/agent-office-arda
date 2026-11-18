@@ -107,7 +107,7 @@ Missing a prerequisite: `xcode-select --install` for the command-line tools, `br
   the result and cost when the reviewer logs them; green posted, amber asked you on Slack, grey
   rejected on Slack, red failed. Hover one for the details; a click opens its PR. See *Configuration*.
 - **Log strip**: general events only (session waiting for you, done, subagent started / finished,
-  review started / posted).
+  review started / posted, feedback on a review, your 👍 on Slack).
 
 Hover an agent for details. **Click a session to bring it to the front where it runs:**
 
@@ -465,11 +465,18 @@ file, not in the repository. Every key is optional.
   - a log whose lines look like `YYYY-MM-DD HH:MM:SS [pr-watch] <repo>#<pr>: …`. A line whose
     event is `posted comment`, `asked you on Slack`, `rejected on Slack` or starts with `FAILED`
     is a finished review and goes on the shelf. After the event, optional ` | key: value` fields
-    say how it went: `result` and `cost` are shown on the shelf, any others in its tooltip.
+    say how it went: `result` and `cost` are shown on the shelf, any others in its tooltip. A
+    re-review that checked the earlier findings again can add `fixed`, `open` and `new` (how many
+    were fixed, are still open, are new): the shelf shows them as ✅3 ⏳1 🆕2 before the result.
+    A line whose event starts with `feedback` (`feedback from <name>`) is not a review: when it is
+    newer than the PR's entry on the shelf, the entry gets a 💬 and its tooltip says from whom.
+    Feedback lines and `👍 on Slack → review requested` also show in the log strip.
 
     ```
     2026-11-18 11:03:55 [pr-watch] infra#230: posted comment | result: 2 Blocking, 1 Major | cost: $1.84
     2026-11-18 11:20:12 [pr-watch] web-app#126: posted comment | result: No blockers | cost: $0.62
+    2026-11-18 12:40:00 [pr-watch] web-app#131: posted comment | result: No blockers | cost: $0.71 | fixed: 3 | open: 1 | new: 2
+    2026-11-18 13:02:00 [pr-watch] web-app#131: feedback from Casey L.
     ```
 
   `slots` is the number of review desks. `overdueMinutes` (default 45, `0` turns it off) is how

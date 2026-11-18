@@ -202,6 +202,11 @@ function mins(sec) { const m = Math.max(0, Math.round(sec / 60)); return m < 60 
 function base(p) { return (p || "").split("/").filter(Boolean).slice(-2).join("/"); }
 function hhmm(t) { const d = new Date(t * 1000); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); }
 function clip(s, n) { s = s || ""; return s.length > n ? s.slice(0, Math.max(1, n - 1)) + "…" : s; }
+// clip to a width in CSS px, for text with emoji (wider than a character)
+function clipW(s, w, size) {
+  g.font = (size || 10) + "px Menlo, monospace"; if (g.measureText(s).width <= w) return s;
+  const a = [...s]; while (a.length > 1 && g.measureText(a.join("") + "…").width > w) a.pop(); return a.join("") + "…";
+}
 function team(cwd) { return (cwd || "").split("/").filter(Boolean).slice(0, 6).join("/"); }
 // "claude-opus-5-5" → "Opus 5.5", "claude-sonnet-5-5-20261001" → "Sonnet 5.5"
 function modelName(m) {
@@ -276,8 +281,9 @@ function reviewEvent(line) {
     [/Slack notified \(safe\)/, "✅ safe to merge"], [/Slack notified \(nits\)/, "🟢 safe, nits only"],
     [/FAILED, temporary/, "↻ review hit a network error, will retry"], [/FAILED/, "⚠️ review failed"],
     [/only a sync/, "↔ only a main sync, not re-reviewed"], [/you approved it/, "👍 approved by you, skipped"],
-    [/removed from the queue by you/, "✋ removed by you"],
+    [/removed from the queue by you/, "✋ removed by you"], [/^👍 on Slack → review requested/, "👍 on Slack → review requested"],
   ];
+  if (/^feedback\b/.test(msg)) return { t, text: "💬 " + msg + " · " + pr };   // "feedback from <name>"
   for (const [re, text] of rules) if (re.test(msg)) return { t, text: text + " · " + pr };
   return null;
 }
@@ -323,7 +329,10 @@ function build(raw) {
   events.sort((a, b) => b.t - a.t);
   // the review room's shelf: the latest finished review of each PR, newest first
   const finished = new Map();
-  (raw.reviewLog || []).forEach((l, n) => { const r = reviewLine(l), kind = r && finishedKind(r.event); if (kind) finished.set(r.pr, { ...r, kind, n }); });
+  // and the feedback on it since: "feedback from <name>" lines after its finished line
+  (raw.reviewLog || []).forEach((l, n) => { const r = reviewLine(l), kind = r && finishedKind(r.event), e = r && finished.get(r.pr);
+    if (kind) finished.set(r.pr, { ...r, kind, n, replies: [] });
+    else if (e && /^feedback\b/.test(r.event) && r.t >= e.t) e.replies.push(r); });
   const shelf = [...finished.values()].sort((a, b) => b.t - a.t || b.n - a.n).slice(0, SHELF_MAX);
   energy = !!(raw.settings && raw.settings.energySaver);
   if (raw.settings && raw.settings.welcome && !welcomeSeen) showWelcome();
@@ -757,10 +766,21 @@ function draw() {
       const word = r.kind === "failed" ? (/temporary/.test(r.event) ? "failed, will retry" : "review failed") : SHELF_WORD[r.kind];
       px(ex + 1, S.y + 2, 3, 7, c.binder); px(ex + 1, S.y + 2, 3, 1, shade(c.binder, 0.3)); px(ex + 2, S.y + 4, 1, 2, "#f4efe4");   // a binder
       label(clip(r.repo, Math.max(3, chars - tail.length)) + tail, (ex + 7) * P, S.y * P, "#f1ebe2", 9);
-      label(clip([r.fields.result, r.fields.cost].filter(Boolean).join(" · ") || word, chars), (ex + 7) * P, (S.y + 4.5) * P, c.text, 9);
+      // a re-review says what became of the earlier findings: fixed, still open, and new ones
+      const f = r.fields, prog = [["✅", f.fixed], ["⏳", f.open], ["🆕", f.new]].filter(p => p[1] !== undefined);
+      label(clipW([prog.map(p => p[0] + p[1]).join(" "), f.result, f.cost].filter(Boolean).join(" · ") || word, (ew - 8) * P - 6, 9), (ex + 7) * P, (S.y + 4.5) * P, c.text, 9);
+      if (r.replies.length) {    // feedback on it since: a speech bubble over the binder
+        px(ex - 1, S.y - 4, 7, 4, "#f4efe4"); px(ex + 1, S.y, 2, 1, "#f4efe4"); px(ex + 2, S.y + 1, 1, 1, "#f4efe4");
+        for (const d of [0, 2, 4]) px(ex + d, S.y - 3, 1, 1, "#5b8def");
+      }
+      const who = [...new Set(r.replies.map(e => e.event.replace(/^feedback\s*(from\s*)?/, "") || "someone"))];
       const url = snap.workspace ? `https://bitbucket.org/${snap.workspace}/${r.repo}/pull-requests/${r.id}` : "";
-      hits.push({ x: ex * P, y: (S.y - 1) * P, w: ew * P, h: 16 * P, url,
-        tip: `${r.pr} · ${word}\n${hhmm(r.t)}, ${ago} · ${r.event}` + Object.entries(r.fields).map(([f, v]) => `\n${f}: ${v}`).join("") + (url ? "\nclick: open the PR" : "") });
+      hits.push({ x: ex * P, y: (S.y - 4) * P, w: ew * P, h: 19 * P, url,
+        tip: `${r.pr} · ${word}\n${hhmm(r.t)}, ${ago} · ${r.event}` +
+          (prog.length ? `\nsince the last review: ${[f.fixed && f.fixed + " fixed", f.open && f.open + " still open", f.new && f.new + " new"].filter(Boolean).join(", ")}` : "") +
+          Object.entries(f).filter(([k]) => !["fixed", "open", "new"].includes(k)).map(([k, v]) => `\n${k}: ${v}`).join("") +
+          (r.replies.length ? `\n💬 ${r.replies.length} feedback since, from ${who.join(", ")} (last ${hhmm(r.replies[r.replies.length - 1].t)})` : "") +
+          (url ? "\nclick: open the PR" : "") });
     });
   }
 
@@ -1953,8 +1973,10 @@ if (!bridge) {
     reviewLog: [[95, "engine#88: review started"], [86, "engine#88: posted comment | result: 2 Blocking, 1 Major | cost: $1.84"],
                 [70, "docs#41: review started"], [64, "docs#41: FAILED"], [52, "infra#123: review started"],
                 [41, "deploy-scripts#211: posted comment | result: No blockers | cost: $0.62"], [27, "infra#118: asked you on Slack (low confidence)"],
-                [14, "web-app#466: posted comment 1001"], [13, "web-app#466: Slack notified (safe)"],
-                [6, "web-app#470: review started"], [0, "deploy-scripts#214: review started"]].map(([m, msg]) => {
+                [20, "web-app#466: feedback from Casey L."],
+                [14, "web-app#466: posted comment | result: No blockers | cost: $0.71 | fixed: 3 | open: 1 | new: 2"], [13, "web-app#466: Slack notified (safe)"],
+                [9, "deploy-scripts#211: feedback from Casey L."], [6, "web-app#470: review started"], [4, "deploy-scripts#211: feedback from Sam R."],
+                [2, "docs#45: 👍 on Slack → review requested"], [0, "deploy-scripts#214: review started"]].map(([m, msg]) => {
       const d = new Date(Date.now() - m * 60000), z = n => String(n).padStart(2, "0");
       return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())} ${z(d.getHours())}:${z(d.getMinutes())}:${z(d.getSeconds())} [pr-watch] ${msg}`; }),
   }; };

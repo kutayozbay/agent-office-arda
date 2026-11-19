@@ -542,6 +542,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         FileManager.default.createFile(atPath: dir + "/" + pr, contents: Data())
     }
 
+    /// Tick a "for you" notification off: an empty file named after its Slack ts in the state
+    /// folder's `dismiss/`. pr-watch resolves it (a held review is not posted, a small PR not reviewed).
+    func dismissWaiting(_ key: String) {
+        guard let rs = Config.load().reviewState,
+              key.range(of: "^[0-9]{1,12}\\.[0-9]{1,9}$", options: .regularExpression) != nil else { return }
+        let dir = rs + "/dismiss"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: dir + "/" + key, contents: Data())
+    }
+
     func userContentController(_ c: WKUserContentController, didReceive m: WKScriptMessage) {
         guard let body = m.body as? [String: String] else { return }
         if let h = body["hidden"], h.utf8.count < 64_000 { defaults.set(h, forKey: "hidden") }
@@ -572,6 +582,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         if body["welcome"] == "done" { defaults.set(true, forKey: "welcomed") }
         if let a = body["water"] { waterAnswered(a) }   // the water card's Done / Later (Water.swift)
         if let pr = body["reviewNow"] { requestReview(pr) }   // a PR dragged from "in review" to a desk
+        if let k = body["dismiss"] { dismissWaiting(k) }   // a notification ticked off in the "for you" card
         if let j = body["jukebox"] { jukebox.control(j) }   // previous | playpause | next
         if body["profile"] == "edit" { DispatchQueue.main.async { self.editProfile() } }   // after this message returns
         if let r = body["room"] {

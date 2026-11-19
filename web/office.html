@@ -120,6 +120,31 @@
   #welcome button { font: 12px Menlo, monospace; border-radius: 5px; padding: 7px 12px; cursor: pointer;
     border: 1px solid #4a3d36; background: #2d2630; color: var(--text); }
   #welcome button.go { background: var(--accent); color: #1b1820; border-color: var(--accent); }
+  /* the "for you" card: one notification at a time */
+  #inbox { position: fixed; inset: 0; z-index: 20; display: none; align-items: center; justify-content: center;
+    background: #0d0b10b0; padding: 16px; }
+  #inbox .card { background: var(--panel); border: 3px solid var(--line); border-radius: 8px; width: min(520px, 100%);
+    max-height: 100%; overflow-y: auto; padding: 14px 18px 12px; box-shadow: 0 10px 40px #000a; font-size: 12px; }
+  #inbox .top { display: flex; align-items: center; gap: 8px; color: var(--muted); margin-bottom: 10px; }
+  #inbox .top .n { flex: 1; text-align: center; }
+  #inbox h1 { font-size: 16px; margin: 0 0 4px; color: #ffc370; }
+  #inbox .meta { color: var(--muted); margin-bottom: 8px; }
+  #inbox .kind { padding: 1px 6px; border-radius: 4px; background: #3a3040; color: #ffc370; }
+  #inbox .kind.approve { color: #9fe8b6; }
+  #inbox .title { color: var(--text); font-size: 13px; line-height: 1.5; margin: 0 0 8px; }
+  #inbox .sub { color: var(--muted); line-height: 1.5; margin: 0 0 12px; }
+  #inbox .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  #inbox button { font: 12px Menlo, monospace; border-radius: 5px; padding: 6px 11px; cursor: pointer;
+    border: 1px solid #4a3d36; background: #2d2630; color: var(--text); }
+  #inbox button:disabled { opacity: .35; cursor: default; }
+  #inbox button.go { background: var(--accent); color: #1b1820; border-color: var(--accent); }
+  #inbox ul { list-style: none; padding: 10px 0 0; margin: 12px 0 0; border-top: 1px solid var(--line); }
+  #inbox li { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 4px; cursor: pointer; }
+  #inbox li.on { background: #2d2630; }
+  #inbox li b { color: var(--text); font-weight: normal; white-space: nowrap; }
+  #inbox li span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #inbox input { accent-color: var(--accent); cursor: pointer; margin: 0; }
+  #inbox .keys { color: var(--muted); font-size: 11px; margin: 10px 0 0; text-align: right; }
   #welcome .skip { margin-left: auto; color: var(--muted); font-size: 11px; cursor: pointer; text-decoration: underline; }
   #welcome .dots { display: flex; gap: 5px; margin-bottom: 12px; }
   #welcome .dots i { width: 18px; height: 4px; background: #3d332e; border-radius: 2px; }
@@ -173,6 +198,7 @@
 <div id="people"></div>
 <div id="stats"></div>
 <div id="welcome"><div class="card"></div></div>
+<div id="inbox"><div class="card"></div></div>
 <div id="water"><div class="card"><canvas width="14" height="18"></canvas><div>
   <h1>💧 Time for some water</h1><p>It has been <span class="when">an hour</span>. A glass of water, then back to it.</p>
   <div class="row"><button class="go" data-a="done">Done</button><button data-a="later">In 10 min</button></div>
@@ -377,7 +403,10 @@ function build(raw) {
   // waiting for your 👍/👎 on Slack: a finished review before it is posted (approve), or a small PR (request)
   // null: the reviewer writes no "waiting" file, and the review room has no in-tray
   const waiting = !Array.isArray(raw.waiting) ? null : raw.waiting.map(l => l.split("\t")).filter(f => f.length >= 7)
-    .map(f => ({ name: f[0], slug: f[1], id: f[2], kind: f[3], since: +f[4] || 0, author: f[5], title: f[6] }));
+    .map(f => ({ name: f[0], slug: f[1], id: f[2], kind: f[3], since: +f[4] || 0, author: f[5], title: f[6], key: f[7] || "" }));
+  // ticked off here: hidden at once, until pr-watch has taken it out of the file
+  for (const k of Object.keys(ticked)) if (!(waiting || []).some(w => w.key === k)) delete ticked[k];
+  const waitingNow = waiting && waiting.filter(w => !(w.key && ticked[w.key]));
   const sessions = (raw.sessions || []).filter(s => s && s.id);
   const reviewRepos = new Set(reviews.map(r => r.name));
   const manualReviews = sessions.filter(s => s.kind === "review" && !reviewRepos.has((s.cwd || "").split("/").pop()));
@@ -440,7 +469,7 @@ function build(raw) {
   if (bridge && raw.settings) { termBtn.style.display = "block"; termBtn.classList.toggle("on", !!raw.settings.terminal); if (typeof placeUpdate === "function") placeUpdate(); }
   if (raw.settings && raw.settings.welcome && !welcomeSeen) showWelcome();
   if (raw.jukebox) loadJukeArt(raw.jukebox);
-  return { now: raw.now || Date.now() / 1000, reviews, queue, waiting, manualReviews, all, others: visible.slice(0, MAX_SESSIONS),
+  return { now: raw.now || Date.now() / 1000, reviews, queue, waiting: waitingNow, manualReviews, all, others: visible.slice(0, MAX_SESSIONS),
            overflow: Math.max(0, visible.length - MAX_SESSIONS), hiddenCount: all.filter(s => at.get(s.id) === "hidden").length, lounge,
            events, finished: shelf, inReview, today, workspace: raw.workspace || "", slots: raw.slots || 5, overdue: raw.overdueMinutes ?? 45, jukebox: raw.jukebox || null,
            manager: raw.manager && (raw.manager.image || raw.manager.name || raw.manager.hasImage) ? raw.manager : null,
@@ -801,6 +830,7 @@ const STATE_WORD = { background: "waiting on its subagents", waiting: "waiting f
 // (a file in its state folder's requests/), instead of waiting for its next round.
 let drag = null, dropping = false, skipClick = false;
 const requested = {};            // "repo#id" -> when it was dropped on a desk
+const ticked = {};               // Slack ts of a "for you" notification ticked off (or sent to review) here
 function drawShelf(S, items, title) {
   const open = title === "IN REVIEW";
   const head = S.w >= 120 ? Math.ceil((9 * 5.45 + 9) / P) : 0,   // as wide as "IN REVIEW", so the two shelves line up
@@ -951,12 +981,12 @@ function draw() {
     const wurl = w => snap.workspace ? `https://bitbucket.org/${snap.workspace}/${w.slug}/pull-requests/${w.id}` : "";
     const wtip = snap.waiting.map(w => { const age = snap.now - w.since;
       return `${w.name}#${w.id} · ${w.kind} · ${(age >= 86400 ? Math.floor(age / 86400) + "d" : mins(age)) + " ago"} · ${w.title}`; });
-    hits.push({ x: tx * P, y: (ty - 8) * P, w: (L.cols - 10 - tx) * P, h: 15 * P, url: wn ? wurl(snap.waiting[0]) : "",
+    hits.push({ x: tx * P, y: (ty - 8) * P, w: (L.cols - 10 - tx) * P, h: 15 * P, inbox: wn > 0,
       waiting: snap.waiting.filter(wurl).map(w => [`${w.name}#${w.id}`, wurl(w)]),
       tip: wn ? `${wn} waiting for you on Slack\n` + wtip.join("\n") +
         (snap.waiting.some(w => w.kind === "approve") ? "\napprove: a finished review, posted after your 👍" : "") +
         (snap.waiting.some(w => w.kind === "request") ? "\nrequest: a small PR, reviewed if you 👍 it" : "") +
-        (wurl(snap.waiting[0]) ? `\nclick: open ${snap.waiting[0].name}#${snap.waiting[0].id}` + (wn > 1 ? " · right-click: open another" : "") : "")
+        "\nclick: go through them one by one, tick off what you have seen · right-click: open a PR"
         : "Nothing waiting for your 👍/👎 on Slack" });
   }
   // the shelves: reviewed PRs still open ("in review") and finished ones ("recent"), newest first
@@ -2081,7 +2111,7 @@ window.addEventListener("mouseup", ev => {
     bridge.postMessage({ reviewNow: d.pr }); requested[d.pr] = Date.now() / 1000;
   }
 });
-cv.addEventListener("click", ev => { if (skipClick) { skipClick = false; return; } const h = hitAt(ev); if (!h) return; if (h.profile) { if (bridge) bridge.postMessage({ profile: "edit" }); } else if (h.juke) { if (bridge) bridge.postMessage({ jukebox: h.juke }); } else if (h.lights) setJukeLights(!jukeLights); else if (h.session) openSession(h.session); else if (h.stats) toggleStats(true); else if (h.chat) toggleChat(true); else if (h.mate) mateMenu(ev, h.mate); else if (h.goto) setMySpot(h.goto); else if (h.self) { if (mySpot) setMySpot(mySpot); } else act(h); });
+cv.addEventListener("click", ev => { if (skipClick) { skipClick = false; return; } const h = hitAt(ev); if (!h) return; if (h.profile) { if (bridge) bridge.postMessage({ profile: "edit" }); } else if (h.juke) { if (bridge) bridge.postMessage({ jukebox: h.juke }); } else if (h.lights) setJukeLights(!jukeLights); else if (h.session) openSession(h.session); else if (h.stats) toggleStats(true); else if (h.chat) toggleChat(true); else if (h.mate) mateMenu(ev, h.mate); else if (h.goto) setMySpot(h.goto); else if (h.inbox) openInbox(0); else if (h.self) { if (mySpot) setMySpot(mySpot); } else act(h); });
 
 // Right-click: hide an agent, open its PR or folder, or bring hidden agents back.
 function closeMenu() { menu.style.display = "none"; }
@@ -2116,12 +2146,77 @@ document.addEventListener("mousedown", ev => { if (!menu.contains(ev.target)) cl
 document.addEventListener("keydown", ev => {
   if (window.gameOpen && gameOpen()) return;                          // a mini-game has the keys (games.js)
   if (welcomeEl.style.display === "flex") { if (ev.key === "Escape") closeWelcome(); return; }   // the tour has the keys
+  if (inboxAt >= 0) { inboxKey(ev); return; }                         // the "for you" card has the keys
   if (ev.key === "Escape") { closeMenu(); if (statsOpen) toggleStats(false); if (docked) sayIn.blur(); else if (chatOpen) toggleChat(false); return; }
   if (ev.target && ev.target.tagName === "INPUT") return;      // typing a message
   if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
   if (ev.key === "s" || ev.key === "S") toggleStats();
   if ((ev.key === "g" || ev.key === "G") && window.openGames) openGames();
   if ((ev.key === "c" || ev.key === "C") && room.status !== "off") { ev.preventDefault(); toggleChat(); }
+});
+
+// ---------- the "for you" card ----------
+// Click the in-tray: what waits for you on Slack, one at a time. ‹ › (or ← →) to page, ✓ to tick
+// one off (pr-watch drops it: a held review is not posted, a small PR not reviewed), "Review now"
+// to have a small PR reviewed without the Slack 👍. Ticked-off ones vanish at once.
+const inboxEl = document.getElementById("inbox"), inboxCard = inboxEl.querySelector(".card");
+let inboxAt = -1;                // the one shown; -1: closed
+const INBOX_SAY = {
+  request: "A small PR: not reviewed on its own. Look at it yourself, or have it reviewed (👍 on Slack, or Review now).",
+  approve: "A finished review pr-watch was unsure of, held back. 👍 on Slack posts it on the PR, 👎 drops it." };
+function openInbox(i) { inboxAt = Math.max(0, i || 0); inboxEl.style.display = "flex"; tip.style.display = "none"; renderInbox(); }
+function closeInbox() { inboxAt = -1; inboxEl.style.display = "none"; }
+function inboxGone(w) { if (w.key) ticked[w.key] = Date.now() / 1000; snap.waiting = (snap.waiting || []).filter(x => x !== w); layerKey = ""; renderInbox(); }
+function tickOff(w) { if (!w) return; if (bridge && w.key) bridge.postMessage({ dismiss: w.key }); inboxGone(w); }
+function reviewNow(w) { if (!w) return; const pr = `${w.name}#${w.id}`; if (bridge) bridge.postMessage({ reviewNow: pr }); requested[pr] = Date.now() / 1000; inboxGone(w); }
+function inboxKey(ev) {
+  if (ev.key === "Escape") closeInbox();
+  else if (ev.key === "ArrowLeft") { inboxAt = Math.max(0, inboxAt - 1); renderInbox(); }
+  else if (ev.key === "ArrowRight") { inboxAt = Math.min((snap.waiting || []).length - 1, inboxAt + 1); renderInbox(); }
+  else return;
+  ev.preventDefault();
+}
+function renderInbox() {
+  if (inboxAt < 0 || !snap) return;
+  const list = snap.waiting || [], n = list.length;
+  if (!n) {
+    inboxCard.innerHTML = `<div class="top"><span class="n">for you</span><button data-a="close" title="Close (Esc)">✕</button></div>
+      <h1 style="color:var(--accent)">All clear ✓</h1><p class="sub">Nothing waits for you on Slack.</p>`;
+    return;
+  }
+  inboxAt = Math.min(inboxAt, n - 1);
+  const w = list[inboxAt], age = snap.now - w.since, url = snap.workspace ? `https://bitbucket.org/${snap.workspace}/${w.slug}/pull-requests/${w.id}` : "";
+  inboxCard.innerHTML = `<div class="top"><button data-a="prev" title="Previous (←)"${inboxAt ? "" : " disabled"}>‹</button>
+      <span class="n">${inboxAt + 1} / ${n} for you</span>
+      <button data-a="next" title="Next (→)"${inboxAt < n - 1 ? "" : " disabled"}>›</button><button data-a="close" title="Close (Esc)">✕</button></div>
+    <h1>${esc(w.name)}#${esc(w.id)}</h1>
+    <div class="meta"><span class="kind ${esc(w.kind)}">${w.kind === "approve" ? "held review" : "small PR"}</span> · ${esc(w.author || "?")} · ${age >= 86400 ? Math.floor(age / 86400) + "d" : mins(age)} ago</div>
+    <p class="title">${esc(w.title)}</p>
+    <p class="sub">${INBOX_SAY[w.kind] || ""}</p>
+    <div class="row">${url ? `<button data-a="open">Open PR</button>` : ""}${w.kind === "request" ? `<button data-a="review">Review now</button>` : ""}
+      <button class="go" data-a="tick" title="Seen it: drop it from Slack and the tray"${w.key ? "" : " disabled"}>✓ Tick off</button></div>
+    <ul>${list.map((x, i) => `<li data-i="${i}"${i === inboxAt ? ' class="on"' : ""}><input type="checkbox" data-t="${i}" title="Tick off"${x.key ? "" : " disabled"}>
+      <b>${esc(x.name)}#${esc(x.id)}</b><span>${esc(x.title)}</span></li>`).join("")}</ul>
+    <p class="keys">← → to move · Esc to close</p>`;
+}
+inboxEl.addEventListener("click", ev => {
+  if (ev.target === inboxEl) { closeInbox(); return; }                 // outside the card
+  const list = (snap && snap.waiting) || [], w = list[inboxAt];
+  const t = ev.target.closest("[data-t]");
+  if (t) { tickOff(list[+t.dataset.t]); return; }
+  const b = ev.target.closest("[data-a]");
+  if (b) {
+    const a = b.dataset.a;
+    if (a === "close") closeInbox();
+    else if (a === "prev") { inboxAt = Math.max(0, inboxAt - 1); renderInbox(); }
+    else if (a === "next") { inboxAt = Math.min(list.length - 1, inboxAt + 1); renderInbox(); }
+    else if (a === "open" && w && snap.workspace) act({ url: `https://bitbucket.org/${snap.workspace}/${w.slug}/pull-requests/${w.id}` });
+    else if (a === "review") reviewNow(w);
+    else if (a === "tick") tickOff(w);
+    return;
+  }
+  const li = ev.target.closest("li[data-i]");
+  if (li) { inboxAt = +li.dataset.i; renderInbox(); }
 });
 
 // ---------- stats screen ----------
@@ -2198,7 +2293,7 @@ function renderStats() {
 wrap.addEventListener("scroll", closeMenu);
 
 function refresh() { if (lastRaw) { const next = build(lastRaw); track(next); snap = next; draw(); } }
-window.updateOffice = raw => { lastRaw = raw; if (raw.manager && raw.manager.image !== undefined) loadManager(raw.manager.image); const next = build(raw); track(next); snap = next; planAlert(); renderStats(); };
+window.updateOffice = raw => { lastRaw = raw; if (raw.manager && raw.manager.image !== undefined) loadManager(raw.manager.image); const next = build(raw); track(next); snap = next; planAlert(); renderStats(); renderInbox(); };
 window.addEventListener("resize", () => snap && draw());
 // At most FPS (or ENERGY_FPS) redraws a second, and none while the page is hidden.
 let lastDraw = 0;
@@ -2231,9 +2326,9 @@ if (!bridge) {
     // the open PRs the reviewer watches: reviewed ones stand on the "in review" shelf
     openPRs: [["engine", "engine", "90"], ["engine", "engine", "88"], ["infra", "infra", "118"], ["infra", "infra", "123"],
               ["deploy-scripts", "deploy-scripts", "211"], ["docs", "docs", "41"]].map(f => f.join("\t")),
-    waiting: [["infra", "infra", "118", "approve", Math.floor(t0 - 27 * 60), "Sam R.", "Retry policy for the webhook worker"],
-              ["docs", "docs", "43", "request", Math.floor(t0 - 50 * 60), "Riley M.", "Fix broken links in the setup guide"],
-              ["web-app", "web-app", "469", "request", Math.floor(t0 - 130 * 60), "Jordan K.", "Bump the date library"]].map(f => f.join("\t")),
+    waiting: [["infra", "infra", "118", "approve", Math.floor(t0 - 27 * 60), "Sam R.", "Retry policy for the webhook worker", "1700000001.000100"],
+              ["docs", "docs", "43", "request", Math.floor(t0 - 50 * 60), "Riley M.", "Fix broken links in the setup guide", "1700000002.000200"],
+              ["web-app", "web-app", "469", "request", Math.floor(t0 - 130 * 60), "Jordan K.", "Bump the date library", "1700000003.000300"]].map(f => f.join("\t")),
     sessions: [
       { id: "s1", kind: "session", model: "claude-opus-5-5", effort: "high", title: "Checkout flow refactor", cwd: "/Users/me/code/deploy-scripts", state: "working", since: t0 - 300, beat: Date.now() / 1000,
         subagents: tick % 6 > 1 ? { a1: { type: "Explore" }, a2: { type: "general-purpose" } } : { a1: { type: "Explore" } } },
